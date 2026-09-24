@@ -37,8 +37,6 @@ Never hard-code account IDs, ECR URLs, image digests or signing identities.
 ```powershell
 Copy-Item config/security.env.example config/security.env
 notepad config/security.env
-python scripts/check-security-config.py
-python scripts/render_policies.py
 ```
 
 Then validate the rendered manifests against the target cluster:
@@ -84,6 +82,3 @@ The `tests/bad/` directory intentionally contains insecure examples for admissio
 
 A valid workload is in `tests/good/secure-pod.yaml`.
 
-## Git history
-
-Use `scripts/commit-history.ps1` to create the project as multiple logical commits instead of one giant commit.
