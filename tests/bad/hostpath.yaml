@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata: {name: bad-hostpath}
+spec:
+  containers:
+    - name: app
+      image: nginx:1.27
+  volumes:
+    - name: host
+      hostPath: {path: /}

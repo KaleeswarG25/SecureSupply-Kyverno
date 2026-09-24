@@ -1,0 +1,31 @@
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: securesupply-host-controls
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  variables:
+    - name: containers
+      expression: >-
+        object.spec.containers
+        + object.spec.?initContainers.orValue([])
+        + object.spec.?ephemeralContainers.orValue([])
+  validations:
+    - expression: object.spec.?hostNetwork.orValue(false) == false
+      message: "hostNetwork is forbidden."
+    - expression: object.spec.?hostPID.orValue(false) == false
+      message: "hostPID is forbidden."
+    - expression: object.spec.?hostIPC.orValue(false) == false
+      message: "hostIPC is forbidden."
+    - expression: object.spec.?volumes.orValue([]).all(v, !has(v.hostPath))
+      message: "hostPath volumes are forbidden."
+    - expression: >-
+        variables.containers.all(c, c.?securityContext.capabilities.add.orValue([]).size() == 0)
+      message: "Adding Linux capabilities is forbidden."

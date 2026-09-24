@@ -1,0 +1,34 @@
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: securesupply-sbom-attestation
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 20
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchImageReferences:
+    - glob: "${ALLOWED_ECR_REGISTRY}/*"
+  attestors:
+    - name: githubActions
+      cosign:
+        keyless:
+          identities:
+            - issuer: "${COSIGN_OIDC_ISSUER}"
+              subjectRegExp: "${COSIGN_IDENTITY_REGEXP}"
+  attestations:
+    - name: sbom
+      intoto:
+        type: https://cyclonedx.org/bom
+  validations:
+    - expression: >-
+        images.containers.map(image,
+          verifyAttestationSignatures(image, attestations.sbom, [attestors.githubActions])
+        ).all(result, result > 0)
+      message: "All workload images must have a Cosign-signed SBOM attestation."

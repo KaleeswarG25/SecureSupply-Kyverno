@@ -1,0 +1,20 @@
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: securesupply-namespace-governance
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE, UPDATE]
+        resources: [namespaces]
+  validations:
+    - expression: >-
+        object.metadata.?labels["security"].orValue("") == "restricted"
+      message: "Namespaces must declare security=restricted."
+    - expression: >-
+        object.metadata.?labels["security.networkpolicy/enforced"].orValue("false") == "true"
+      message: "Namespaces must declare security.networkpolicy/enforced=true."

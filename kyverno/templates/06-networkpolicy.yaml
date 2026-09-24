@@ -1,0 +1,21 @@
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: securesupply-networkpolicy
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["networking.k8s.io"]
+        apiVersions: ["v1"]
+        operations: [CREATE, UPDATE]
+        resources: [networkpolicies]
+  validations:
+    - expression: >-
+        object.spec.?policyTypes.orValue([]).exists(x, x == "Ingress") &&
+        object.spec.?policyTypes.orValue([]).exists(x, x == "Egress")
+      message: "Every NetworkPolicy must explicitly govern both ingress and egress."
+    - expression: >-
+        object.metadata.?labels["security.networkpolicy/enforced"].orValue("false") == "true"
+      message: "NetworkPolicy must declare security.networkpolicy/enforced=true."

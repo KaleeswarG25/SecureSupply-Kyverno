@@ -1,0 +1,7 @@
+config/security.env
+generated/
+*.log
+__pycache__/
+.pytest_cache/
+.venv/
+.env

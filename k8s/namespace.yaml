@@ -1,7 +1,8 @@
-﻿apiVersion: v1
+apiVersion: v1
 kind: Namespace
 metadata:
   name: securesupply
   labels:
     app.kubernetes.io/name: securesupply
     security: restricted
+    security.networkpolicy/enforced: "true"

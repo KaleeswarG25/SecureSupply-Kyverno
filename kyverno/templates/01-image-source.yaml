@@ -1,0 +1,28 @@
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: securesupply-image-source
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  variables:
+    - name: containers
+      expression: >-
+        object.spec.containers
+        + object.spec.?initContainers.orValue([])
+        + object.spec.?ephemeralContainers.orValue([])
+    - name: images
+      expression: variables.containers.map(c, parseImageReference(c.image))
+  validations:
+    - expression: >-
+        variables.images.all(i, i.registry() == "${ALLOWED_ECR_REGISTRY}")
+      message: "Every container image must come from the approved Amazon ECR registry."
+    - expression: >-
+        variables.images.all(i, i.containsDigest())
+      message: "Every container image must use an immutable digest."

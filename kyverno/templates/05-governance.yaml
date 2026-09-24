@@ -1,0 +1,34 @@
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: securesupply-workload-governance
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  variables:
+    - name: containers
+      expression: >-
+        object.spec.containers
+        + object.spec.?initContainers.orValue([])
+        + object.spec.?ephemeralContainers.orValue([])
+  validations:
+    - expression: >-
+        object.spec.?serviceAccountName.orValue("") != "" &&
+        object.spec.?automountServiceAccountToken.orValue(true) == false
+      message: "Pods must use an explicit ServiceAccount and disable automatic token mounting."
+    - expression: >-
+        "app.kubernetes.io/name" in object.metadata.?labels.orValue({}) &&
+        "app.kubernetes.io/part-of" in object.metadata.?labels.orValue({})
+      message: "Pods must carry app.kubernetes.io/name and app.kubernetes.io/part-of labels."
+    - expression: >-
+        object.metadata.?labels["security.networkpolicy/enforced"].orValue("false") == "true"
+      message: "Pods must declare security.networkpolicy/enforced=true."
+    - expression: >-
+        variables.containers.all(c, has(c.readinessProbe) && has(c.livenessProbe))
+      message: "Every container must define readiness and liveness probes."

@@ -1,0 +1,30 @@
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: securesupply-cosign-signature
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 20
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchImageReferences:
+    - glob: "${ALLOWED_ECR_REGISTRY}/*"
+  attestors:
+    - name: githubActions
+      cosign:
+        keyless:
+          identities:
+            - issuer: "${COSIGN_OIDC_ISSUER}"
+              subjectRegExp: "${COSIGN_IDENTITY_REGEXP}"
+  validations:
+    - expression: >-
+        images.containers.map(image,
+          verifyImageSignatures(image, [attestors.githubActions])
+        ).all(result, result > 0)
+      message: "All workload images must have a valid Cosign keyless signature from the approved GitHub Actions identity."

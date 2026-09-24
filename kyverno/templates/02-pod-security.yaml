@@ -1,0 +1,42 @@
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: securesupply-pod-security
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  variables:
+    - name: containers
+      expression: >-
+        object.spec.containers
+        + object.spec.?initContainers.orValue([])
+        + object.spec.?ephemeralContainers.orValue([])
+    - name: podSC
+      expression: object.spec.?securityContext.orValue({})
+  validations:
+    - expression: variables.podSC.?runAsNonRoot.orValue(false) == true
+      message: "Pod must explicitly set runAsNonRoot=true."
+    - expression: >-
+        variables.podSC.?seccompProfile.type.orValue("") == "RuntimeDefault"
+      message: "Pod must use seccomp RuntimeDefault."
+    - expression: >-
+        variables.containers.all(c, c.?securityContext.allowPrivilegeEscalation.orValue(true) == false)
+      message: "All containers must set allowPrivilegeEscalation=false."
+    - expression: >-
+        variables.containers.all(c, c.?securityContext.privileged.orValue(false) == false)
+      message: "Privileged containers are forbidden."
+    - expression: >-
+        variables.containers.all(c, c.?securityContext.runAsNonRoot.orValue(false) == true)
+      message: "Every container must set runAsNonRoot=true."
+    - expression: >-
+        variables.containers.all(c, c.?securityContext.readOnlyRootFilesystem.orValue(false) == true)
+      message: "Every container must use a read-only root filesystem."
+    - expression: >-
+        variables.containers.all(c, c.?securityContext.capabilities.drop.orValue([]).exists(x, x == "ALL"))
+      message: "Every container must drop ALL Linux capabilities."
