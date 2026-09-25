@@ -46,8 +46,7 @@ jobs:
           python -m py_compile app/app.py
 
       # ----------------------------------------------------------
-      # Show Kubernetes manifests
-      # This avoids the previous k8s/*.yaml wildcard problem.
+      # Discover Kubernetes YAML files
       # ----------------------------------------------------------
       - name: Discover Kubernetes YAML files
         shell: bash
@@ -129,7 +128,7 @@ jobs:
           output-file: sbom.cdx.json
 
       # ----------------------------------------------------------
-      # Upload SBOM as GitHub artifact
+      # Upload SBOM
       # ----------------------------------------------------------
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
@@ -160,8 +159,16 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: arn:aws:iam::124502390077:role/SecureSupply-GitHubActions
           aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      # ----------------------------------------------------------
+      # Verify AWS OIDC authentication
+      # ----------------------------------------------------------
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
 
       # ----------------------------------------------------------
       # ECR login
