@@ -11,6 +11,7 @@ permissions:
   contents: read
   id-token: write
   packages: write
+  attestations: write
 
 env:
   IMAGE_NAME: securesupply
@@ -19,33 +20,95 @@ env:
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
 
 jobs:
+
+  # ============================================================
+  # 1. STATIC SECURITY / BASIC VALIDATION
+  # ============================================================
   static-security:
     name: Secrets, tests and IaC checks
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------
+      # Secret detection
+      # ----------------------------------------------------------
       - name: GitLeaks
         uses: gitleaks/gitleaks-action@v2
 
+      # ----------------------------------------------------------
+      # Python syntax
+      # ----------------------------------------------------------
       - name: Python syntax
-        run: python -m py_compile app/app.py
+        run: |
+          python -m py_compile app/app.py
 
+      # ----------------------------------------------------------
+      # Show Kubernetes manifests
+      # This avoids the previous k8s/*.yaml wildcard problem.
+      # ----------------------------------------------------------
+      - name: Discover Kubernetes YAML files
+        shell: bash
+        run: |
+          set -e
+
+          echo "Kubernetes files:"
+          find k8s -type f \( -name "*.yaml" -o -name "*.yml" \) -print
+
+          if ! find k8s -type f \( -name "*.yaml" -o -name "*.yml" \) | grep -q .; then
+            echo "ERROR: No Kubernetes YAML files found under k8s/"
+            exit 1
+          fi
+
+      # ----------------------------------------------------------
+      # YAML syntax validation
+      # ----------------------------------------------------------
       - name: YAML parse
-        uses: docker://mikefarah/yq:4
-        with:
-          args: eval-all '.' k8s/*.yaml
+        shell: bash
+        run: |
+          set -e
 
+          files=$(find k8s -type f \( -name "*.yaml" -o -name "*.yml" \))
+
+          for file in $files; do
+            echo "Validating YAML: $file"
+
+            docker run --rm \
+              -v "$PWD:/work" \
+              -w /work \
+              mikefarah/yq:4 \
+              eval '.' "$file" > /dev/null
+          done
+
+          echo "All Kubernetes YAML files parsed successfully."
+
+
+  # ============================================================
+  # 2. BUILD + TRIVY + SBOM
+  # ============================================================
   build-scan-sbom:
     name: Build, Trivy and SBOM
     runs-on: ubuntu-latest
     needs: static-security
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
+      # ----------------------------------------------------------
+      # Build Docker image
+      # ----------------------------------------------------------
       - name: Build image
-        run: docker build -t $IMAGE_NAME:${{ github.sha }} ./app
+        run: |
+          docker build \
+            -t "$IMAGE_NAME:${GITHUB_SHA}" \
+            ./app
 
+      # ----------------------------------------------------------
+      # Trivy vulnerability scan
+      # ----------------------------------------------------------
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@master
         with:
@@ -55,57 +118,120 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
 
-      - name: Install Syft
-        uses: anchore/scan-action@v6
+      # ----------------------------------------------------------
+      # Generate SBOM
+      # ----------------------------------------------------------
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
         with:
           image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          output-format: cyclonedx-json
+          format: cyclonedx-json
           output-file: sbom.cdx.json
-          fail-build: false
 
+      # ----------------------------------------------------------
+      # Upload SBOM as GitHub artifact
+      # ----------------------------------------------------------
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
         with:
           name: sbom-${{ github.sha }}
           path: sbom.cdx.json
 
+
+  # ============================================================
+  # 3. SUPPLY CHAIN
+  # ============================================================
   supply-chain:
     name: ECR push, Cosign signature, SBOM and provenance
+
+    # Don't push/sign images from pull requests.
     if: github.event_name != 'pull_request'
+
     runs-on: ubuntu-latest
     needs: build-scan-sbom
-    steps:
-      - uses: actions/checkout@v4
 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------
+      # AWS OIDC
+      # ----------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # ----------------------------------------------------------
+      # ECR login
+      # ----------------------------------------------------------
       - name: Login to ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # ----------------------------------------------------------
+      # Build + push immutable SHA image
+      # ----------------------------------------------------------
       - name: Build and push immutable image
         env:
           REGISTRY: ${{ env.ECR_REGISTRY }}
           REPOSITORY: ${{ env.ECR_REPOSITORY }}
+
+        shell: bash
         run: |
-          docker build -t "$REGISTRY/$REPOSITORY:${GITHUB_SHA}" ./app
-          docker push "$REGISTRY/$REPOSITORY:${GITHUB_SHA}"
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$REGISTRY/$REPOSITORY:${GITHUB_SHA}" | cut -d'@' -f2)
-          echo "IMAGE_REF=$REGISTRY/$REPOSITORY@$DIGEST" >> "$GITHUB_ENV"
+          set -e
+
+          IMAGE="$REGISTRY/$REPOSITORY:${GITHUB_SHA}"
+
+          echo "Building: $IMAGE"
+
+          docker build \
+            -t "$IMAGE" \
+            ./app
+
+          echo "Pushing: $IMAGE"
+
+          docker push "$IMAGE"
+
+          echo "Getting image digest..."
+
+          DIGEST=$(docker inspect \
+            --format='{{index .RepoDigests 0}}' \
+            "$IMAGE" | cut -d'@' -f2)
+
+          if [ -z "$DIGEST" ]; then
+            echo "ERROR: Could not determine image digest."
+            exit 1
+          fi
+
+          IMAGE_REF="$REGISTRY/$REPOSITORY@$DIGEST"
+
+          echo "IMAGE_REF=$IMAGE_REF" >> "$GITHUB_ENV"
           echo "IMAGE_DIGEST=$DIGEST" >> "$GITHUB_ENV"
 
+          echo "Immutable image:"
+          echo "$IMAGE_REF"
+
+      # ----------------------------------------------------------
+      # Cosign installation
+      # ----------------------------------------------------------
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3.9.0
 
+      # ----------------------------------------------------------
+      # Keyless image signing
+      # ----------------------------------------------------------
       - name: Sign image keylessly
         env:
           COSIGN_YES: "true"
-        run: cosign sign "$IMAGE_REF"
 
+        run: |
+          cosign sign "$IMAGE_REF"
+
+      # ----------------------------------------------------------
+      # Generate SBOM for exact ECR image
+      # ----------------------------------------------------------
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@v0
         with:
@@ -113,11 +239,22 @@ jobs:
           format: cyclonedx-json
           output-file: sbom.cdx.json
 
+      # ----------------------------------------------------------
+      # Attach SBOM attestation to image
+      # ----------------------------------------------------------
       - name: Attest SBOM with Cosign
         env:
           COSIGN_YES: "true"
-        run: cosign attest --type cyclonedx --predicate sbom.cdx.json "$IMAGE_REF"
 
+        run: |
+          cosign attest \
+            --type cyclonedx \
+            --predicate sbom.cdx.json \
+            "$IMAGE_REF"
+
+      # ----------------------------------------------------------
+      # SLSA build provenance
+      # ----------------------------------------------------------
       - name: Generate SLSA provenance
         uses: actions/attest-build-provenance@v2
         with:
