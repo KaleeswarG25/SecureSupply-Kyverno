@@ -7,8 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# AWS uses access keys.
+# GitHub provenance/cosign still requires id-token: write.
 permissions:
   contents: read
+  id-token: write
   packages: write
   attestations: write
 
@@ -30,7 +33,7 @@ jobs:
     steps:
 
       # ----------------------------------------------------------
-      # Checkout FULL Git history
+      # Checkout full Git history
       # Required by GitLeaks
       # ----------------------------------------------------------
       - name: Checkout repository
@@ -104,7 +107,7 @@ jobs:
     steps:
 
       # ----------------------------------------------------------
-      # Checkout FULL Git history
+      # Checkout full Git history
       # ----------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -115,6 +118,7 @@ jobs:
       # Build Docker image
       # ----------------------------------------------------------
       - name: Build image
+        shell: bash
         run: |
           set -e
 
@@ -160,7 +164,7 @@ jobs:
   supply-chain:
     name: ECR push, Cosign signature, SBOM and provenance
 
-    # Don't push/sign images from pull requests.
+    # Never push/sign images from pull requests.
     if: github.event_name != 'pull_request'
 
     runs-on: ubuntu-latest
@@ -169,7 +173,7 @@ jobs:
     steps:
 
       # ----------------------------------------------------------
-      # Checkout FULL Git history
+      # Checkout full Git history
       # ----------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -189,7 +193,8 @@ jobs:
           echo "GITHUB_SHA=$GITHUB_SHA"
 
       # ==========================================================
-      # AWS ACCESS KEY AUTHENTICATION
+      # AWS AUTHENTICATION
+      # Uses GitHub Secrets, NOT AWS OIDC
       # ==========================================================
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
@@ -265,6 +270,7 @@ jobs:
 
       # ----------------------------------------------------------
       # Keyless image signing
+      # Uses GitHub OIDC
       # ----------------------------------------------------------
       - name: Sign image keylessly
         env:
@@ -279,7 +285,7 @@ jobs:
           cosign sign "$IMAGE_REF"
 
       # ----------------------------------------------------------
-      # Generate CycloneDX SBOM
+      # Generate CycloneDX SBOM for exact ECR image
       # ----------------------------------------------------------
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@v0
@@ -289,7 +295,7 @@ jobs:
           output-file: sbom.cdx.json
 
       # ----------------------------------------------------------
-      # Attach SBOM attestation
+      # Attach SBOM attestation using Cosign
       # ----------------------------------------------------------
       - name: Attest SBOM with Cosign
         env:
@@ -305,6 +311,7 @@ jobs:
 
       # ----------------------------------------------------------
       # SLSA build provenance
+      # Requires GitHub id-token permission
       # ----------------------------------------------------------
       - name: Generate SLSA provenance
         uses: actions/attest-build-provenance@v2
