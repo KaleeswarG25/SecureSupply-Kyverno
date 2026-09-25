@@ -1,0 +1,15 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: kyverno-test-cluster
+  region: us-east-1
+
+managedNodeGroups:
+  - name: securesupply-nodes
+    instanceType: t3.small
+    minSize: 1
+    maxSize: 2
+    desiredCapacity: 1
+    volumeSize: 20
+    privateNetworking: false
