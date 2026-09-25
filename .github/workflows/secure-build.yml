@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
   packages: write
   attestations: write
 
@@ -161,7 +160,7 @@ jobs:
   supply-chain:
     name: ECR push, Cosign signature, SBOM and provenance
 
-    # Do not push/sign images from pull requests.
+    # Don't push/sign images from pull requests.
     if: github.event_name != 'pull_request'
 
     runs-on: ubuntu-latest
@@ -178,7 +177,7 @@ jobs:
           fetch-depth: 0
 
       # ----------------------------------------------------------
-      # DEBUG GitHub context
+      # Debug GitHub context
       # ----------------------------------------------------------
       - name: DEBUG GitHub context
         run: |
@@ -189,15 +188,15 @@ jobs:
           echo "GITHUB_WORKFLOW=$GITHUB_WORKFLOW"
           echo "GITHUB_SHA=$GITHUB_SHA"
 
-      # ----------------------------------------------------------
-      # AWS OIDC
-      # ----------------------------------------------------------
+      # ==========================================================
+      # AWS ACCESS KEY AUTHENTICATION
+      # ==========================================================
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::124502390077:role/SecureSupply-GitHubActions
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-          audience: sts.amazonaws.com
 
       # ----------------------------------------------------------
       # Verify AWS authentication
@@ -280,7 +279,7 @@ jobs:
           cosign sign "$IMAGE_REF"
 
       # ----------------------------------------------------------
-      # Generate CycloneDX SBOM for exact ECR image
+      # Generate CycloneDX SBOM
       # ----------------------------------------------------------
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@v0
@@ -290,7 +289,7 @@ jobs:
           output-file: sbom.cdx.json
 
       # ----------------------------------------------------------
-      # Attach SBOM attestation using Cosign
+      # Attach SBOM attestation
       # ----------------------------------------------------------
       - name: Attest SBOM with Cosign
         env:
