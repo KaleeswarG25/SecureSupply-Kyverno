@@ -1,7 +1,42 @@
+@'
+# Local configuration / secrets
 config/security.env
+.env
+.env.*
+!.env.example
+
+# Generated manifests
 generated/
-*.log
+
+# Python
 __pycache__/
 .pytest_cache/
 .venv/
-.env
+*.pyc
+
+# Logs
+*.log
+
+# Local Kubernetes / cloud credentials
+.kube/
+kubeconfig
+*.kubeconfig
+
+# Terraform local state
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local certificates / keys
+*.pem
+*.key
+*.p12
+*.pfx
+'@ | Set-Content .\.gitignore -Encoding UTF8

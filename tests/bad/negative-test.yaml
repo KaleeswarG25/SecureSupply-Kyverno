@@ -1,0 +1,11 @@
+﻿apiVersion: v1
+kind: Pod
+metadata:
+  name: kyverno-negative-test
+  namespace: securesupply
+spec:
+  containers:
+    - name: test
+      image: <ECR_REGISTRY>/<ECR_REPOSITORY>@<IMAGE_DIGEST>
+      securityContext:
+        privileged: true

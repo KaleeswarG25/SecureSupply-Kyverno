@@ -16,7 +16,7 @@ spec:
       type: RuntimeDefault
   containers:
     - name: app
-      image: 124502390077.dkr.ecr.us-east-1.amazonaws.com/securesupply@sha256:3af5e519eeeca898e237ffd01872b5def89dccf870a32aa9cd9f81ec9c969f6a
+      image: <ECR_REGISTRY>/<ECR_REPOSITORY>@<IMAGE_DIGEST>
       ports:
         - containerPort: 8080
       securityContext:

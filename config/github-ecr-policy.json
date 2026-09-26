@@ -1,4 +1,4 @@
-{
+﻿{
   "Version": "2012-10-17",
   "Statement": [
     {
@@ -17,7 +17,7 @@
         "ecr:PutImage",
         "ecr:UploadLayerPart"
       ],
-      "Resource": "arn:aws:ecr:us-east-1:124502390077:repository/securesupply"
+      "Resource": "arn:aws:ecr:<AWS_REGION>:<AWS_ACCOUNT_ID>:repository/<ECR_REPOSITORY>"
     }
   ]
 }
