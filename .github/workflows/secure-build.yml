@@ -368,7 +368,7 @@ jobs:
           echo "=========================================="
 
           cosign attest \
-            --predicate-type https://cyclonedx.org/bom \
+            --type https://cyclonedx.org/bom \
             --predicate sbom.cdx.json \
             "$IMAGE_REF"
 
