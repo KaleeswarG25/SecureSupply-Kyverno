@@ -7,12 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# AWS uses access keys.
-# GitHub provenance/cosign still requires id-token: write.
 permissions:
   contents: read
-  id-token: write
   packages: write
+  id-token: write
   attestations: write
 
 env:
@@ -34,7 +32,6 @@ jobs:
 
       # ----------------------------------------------------------
       # Checkout full Git history
-      # Required by GitLeaks
       # ----------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -50,11 +47,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # ----------------------------------------------------------
-      # Python syntax
+      # Python syntax validation
       # ----------------------------------------------------------
       - name: Python syntax
         run: |
+          set -e
+
+          echo "Checking Python syntax..."
+
           python -m py_compile app/app.py
+
+          echo "Python syntax check passed."
 
       # ----------------------------------------------------------
       # Discover Kubernetes YAML files
@@ -122,9 +125,13 @@ jobs:
         run: |
           set -e
 
+          echo "Building application image..."
+
           docker build \
             -t "$IMAGE_NAME:${GITHUB_SHA}" \
             ./app
+
+          echo "Docker build completed."
 
       # ----------------------------------------------------------
       # Trivy vulnerability scan
@@ -139,7 +146,7 @@ jobs:
           exit-code: '1'
 
       # ----------------------------------------------------------
-      # Generate SBOM
+      # Generate CycloneDX SBOM
       # ----------------------------------------------------------
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
@@ -149,7 +156,7 @@ jobs:
           output-file: sbom.cdx.json
 
       # ----------------------------------------------------------
-      # Upload SBOM
+      # Upload SBOM artifact
       # ----------------------------------------------------------
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
@@ -181,9 +188,10 @@ jobs:
           fetch-depth: 0
 
       # ----------------------------------------------------------
-      # Debug GitHub context
+      # GitHub context
       # ----------------------------------------------------------
       - name: DEBUG GitHub context
+        shell: bash
         run: |
           echo "GITHUB_REPOSITORY=$GITHUB_REPOSITORY"
           echo "GITHUB_REF=$GITHUB_REF"
@@ -192,10 +200,9 @@ jobs:
           echo "GITHUB_WORKFLOW=$GITHUB_WORKFLOW"
           echo "GITHUB_SHA=$GITHUB_SHA"
 
-      # ==========================================================
-      # AWS AUTHENTICATION
-      # Uses GitHub Secrets, NOT AWS OIDC
-      # ==========================================================
+      # ----------------------------------------------------------
+      # AWS access key authentication
+      # ----------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
@@ -207,18 +214,23 @@ jobs:
       # Verify AWS authentication
       # ----------------------------------------------------------
       - name: Verify AWS identity
+        shell: bash
         run: |
+          set -e
+
+          echo "AWS identity:"
+
           aws sts get-caller-identity
 
       # ----------------------------------------------------------
-      # ECR login
+      # Login to Amazon ECR
       # ----------------------------------------------------------
       - name: Login to ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       # ----------------------------------------------------------
-      # Build + push immutable SHA image
+      # Build and push immutable SHA image
       # ----------------------------------------------------------
       - name: Build and push immutable image
         env:
@@ -231,19 +243,25 @@ jobs:
 
           IMAGE="$REGISTRY/$REPOSITORY:${GITHUB_SHA}"
 
-          echo "Building:"
+          echo "=========================================="
+          echo "Building immutable image"
+          echo "=========================================="
           echo "$IMAGE"
 
           docker build \
             -t "$IMAGE" \
             ./app
 
-          echo "Pushing:"
+          echo "=========================================="
+          echo "Pushing image to ECR"
+          echo "=========================================="
           echo "$IMAGE"
 
           docker push "$IMAGE"
 
-          echo "Getting image digest..."
+          echo "=========================================="
+          echo "Getting ECR image digest"
+          echo "=========================================="
 
           DIGEST=$(docker inspect \
             --format='{{index .RepoDigests 0}}' \
@@ -259,8 +277,15 @@ jobs:
           echo "IMAGE_REF=$IMAGE_REF" >> "$GITHUB_ENV"
           echo "IMAGE_DIGEST=$DIGEST" >> "$GITHUB_ENV"
 
-          echo "Immutable image:"
+          echo "=========================================="
+          echo "Immutable image"
+          echo "=========================================="
           echo "$IMAGE_REF"
+
+          echo "=========================================="
+          echo "Image digest"
+          echo "=========================================="
+          echo "$DIGEST"
 
       # ----------------------------------------------------------
       # Install Cosign
@@ -269,20 +294,35 @@ jobs:
         uses: sigstore/cosign-installer@v3.9.0
 
       # ----------------------------------------------------------
+      # Verify Cosign installation
+      # ----------------------------------------------------------
+      - name: Verify Cosign installation
+        shell: bash
+        run: |
+          set -e
+
+          cosign version
+
+      # ----------------------------------------------------------
       # Keyless image signing
-      # Uses GitHub OIDC
       # ----------------------------------------------------------
       - name: Sign image keylessly
         env:
           COSIGN_YES: "true"
 
+        shell: bash
         run: |
           set -e
 
-          echo "Signing:"
+          echo "=========================================="
+          echo "Signing image with Cosign keyless signing"
+          echo "=========================================="
+
           echo "$IMAGE_REF"
 
           cosign sign "$IMAGE_REF"
+
+          echo "Cosign image signature created."
 
       # ----------------------------------------------------------
       # Generate CycloneDX SBOM for exact ECR image
@@ -295,23 +335,67 @@ jobs:
           output-file: sbom.cdx.json
 
       # ----------------------------------------------------------
-      # Attach SBOM attestation using Cosign
+      # Validate SBOM file exists
+      # ----------------------------------------------------------
+      - name: Validate SBOM
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -s sbom.cdx.json ]; then
+            echo "ERROR: SBOM file was not generated."
+            exit 1
+          fi
+
+          echo "SBOM generated successfully."
+
+          echo "SBOM size:"
+          wc -c sbom.cdx.json
+
+      # ----------------------------------------------------------
+      # Attach CycloneDX SBOM attestation
       # ----------------------------------------------------------
       - name: Attest SBOM with Cosign
         env:
           COSIGN_YES: "true"
 
+        shell: bash
         run: |
           set -e
 
+          echo "=========================================="
+          echo "Creating CycloneDX SBOM attestation"
+          echo "=========================================="
+
           cosign attest \
-            --type cyclonedx \
+            --predicate-type https://cyclonedx.org/bom \
             --predicate sbom.cdx.json \
             "$IMAGE_REF"
 
+          echo "SBOM attestation created."
+
+      # ----------------------------------------------------------
+      # Verify Cosign SBOM attestation
+      # ----------------------------------------------------------
+      - name: Verify SBOM attestation
+        shell: bash
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Verifying SBOM attestation"
+          echo "=========================================="
+
+          cosign verify-attestation \
+            --type https://cyclonedx.org/bom \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp 'https://github\.com/KaleeswarG25/SecureSupply-Kyverno/.github/workflows/secure-build\.yml@refs/heads/main' \
+            "$IMAGE_REF"
+
+          echo "SBOM attestation verification passed."
+
       # ----------------------------------------------------------
       # SLSA build provenance
-      # Requires GitHub id-token permission
       # ----------------------------------------------------------
       - name: Generate SLSA provenance
         uses: actions/attest-build-provenance@v2
@@ -319,3 +403,21 @@ jobs:
           subject-name: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
           subject-digest: ${{ env.IMAGE_DIGEST }}
           push-to-registry: true
+
+      # ----------------------------------------------------------
+      # Final supply-chain summary
+      # ----------------------------------------------------------
+      - name: Supply chain summary
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "SECURE SUPPLY CHAIN COMPLETE"
+          echo "=========================================="
+          echo "Repository : $GITHUB_REPOSITORY"
+          echo "Commit     : $GITHUB_SHA"
+          echo "Image      : $IMAGE_REF"
+          echo "Digest     : $IMAGE_DIGEST"
+          echo "Signature  : Cosign keyless"
+          echo "SBOM       : CycloneDX"
+          echo "Provenance : SLSA"
+          echo "=========================================="
