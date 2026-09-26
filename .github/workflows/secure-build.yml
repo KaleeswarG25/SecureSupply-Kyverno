@@ -353,46 +353,15 @@ jobs:
           wc -c sbom.cdx.json
 
       # ----------------------------------------------------------
-      # Attach CycloneDX SBOM attestation
+      # Attach CycloneDX SBOM using GitHub Attestations
       # ----------------------------------------------------------
-      - name: Attest SBOM with Cosign
-        env:
-          COSIGN_YES: "true"
-
-        shell: bash
-        run: |
-          set -e
-
-          echo "=========================================="
-          echo "Creating CycloneDX SBOM attestation"
-          echo "=========================================="
-
-          cosign attest \
-            --type https://cyclonedx.org/bom \
-            --predicate sbom.cdx.json \
-            "$IMAGE_REF"
-
-          echo "SBOM attestation created."
-
-      # ----------------------------------------------------------
-      # Verify Cosign SBOM attestation
-      # ----------------------------------------------------------
-      - name: Verify SBOM attestation
-        shell: bash
-        run: |
-          set -e
-
-          echo "=========================================="
-          echo "Verifying SBOM attestation"
-          echo "=========================================="
-
-          cosign verify-attestation \
-            --type https://cyclonedx.org/bom \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity-regexp 'https://github\.com/KaleeswarG25/SecureSupply-Kyverno/.github/workflows/secure-build\.yml@refs/heads/main' \
-            "$IMAGE_REF"
-
-          echo "SBOM attestation verification passed."
+      - name: Attest CycloneDX SBOM
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+          subject-digest: ${{ env.IMAGE_DIGEST }}
+          sbom-path: sbom.cdx.json
+          push-to-registry: true
 
       # ----------------------------------------------------------
       # SLSA build provenance
